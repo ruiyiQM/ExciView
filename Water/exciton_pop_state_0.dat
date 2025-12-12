@@ -1,0 +1,8 @@
+# Exciton Spatial Analysis | State 0
+# Mapped 1 files using mulliken_snippet.in
+# Normalization Applied: Yes
+# Atom   Hole         Electron     Diff(E-H)   
+#--------------------------------------------------
+  1      0.681935     0.200541     -0.481394   
+  2      0.159033     0.399798     0.240766    
+  3      0.159033     0.399661     0.240628    
