@@ -1,0 +1,40 @@
+# Exciton Analysis | State 1
+# Mapped 1 files using ./Water/mulliken_snippet.in
+# Normalization Applied: Yes
+
+# SECTION 1: ORBITAL ANGULAR MOMENTUM (GLOBAL %)
+# Orbital  Hole_Contrib    Elec_Contrib   
+#----------------------------------------
+  s        0.216924        1.116615       
+  p        0.780886        -0.118270      
+  d        0.001730        0.001517       
+  f        0.000460        0.000138       
+
+# SECTION 2: ATOMIC POPULATION SUMMARY
+# Atom   Hole         Electron     Diff(E-H)   
+#--------------------------------------------------
+  1      0.891237     -0.132141    -1.023378   
+  2      0.054381     0.566070     0.511689    
+  3      0.054381     0.566070     0.511689    
+
+# SECTION 3: DETAILED ATOMIC ORBITAL BREAKDOWN
+# Breakdown of l-channels (s, p, d...) per atom
+#------------------------------------------------------------
+Atom: 1    | Hole Pop: 0.891237 | Elec Pop: -0.132141
+    l=0 (s)    H: 0.124921   E: -0.000001
+    l=1 (p)    H: 0.764126   E: -0.133795
+    l=2 (d)    H: 0.001730   E: 0.001517
+    l=3 (f)    H: 0.000460   E: 0.000138
+
+Atom: 2    | Hole Pop: 0.054381 | Elec Pop: 0.566070
+    l=0 (s)    H: 0.046001   E: 0.558308
+    l=1 (p)    H: 0.008380   E: 0.007762
+    l=2 (d)    H: 0.000000   E: 0.000000
+    l=3 (f)    H: 0.000000   E: 0.000000
+
+Atom: 3    | Hole Pop: 0.054381 | Elec Pop: 0.566070
+    l=0 (s)    H: 0.046001   E: 0.558308
+    l=1 (p)    H: 0.008380   E: 0.007762
+    l=2 (d)    H: 0.000000   E: 0.000000
+    l=3 (f)    H: 0.000000   E: 0.000000
+
