@@ -2,7 +2,7 @@
 
 **BSE/Excited State Analysis Tools for FHI-aims**
 
-**Implemented by:** Ruiyi Zhou (ETH Zurich)
+**Implemented by:** Ruiyi Zhou (ETH Zurich) ruiyi.zhou@phys.chem.ethz.ch
 
 ExciView is a Python-based toolkit designed to analyze excited state wavefunctions (excitons) calculated using the Bethe-Salpeter Equation (BSE) formalism in **FHI-aims**. It bridges the gap between reciprocal space (k-space) eigenvector weights and real-space atomic contributions.
 
@@ -34,4 +34,4 @@ The tool operates in a two-phase pipeline to ensure efficiency:
 *   Matplotlib
 
 ## ✉️ Contact
-For questions or issues, please contact **Ruiyi Zhou** at ETH Zurich.
+For questions or issues, please contact **Ruiyi Zhou** (ruiyi.zhou@phys.chem.ethz.ch) at ETH Zurich.
