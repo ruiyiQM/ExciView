@@ -24,14 +24,13 @@ The tool operates in a two-phase pipeline to ensure efficiency:
 ## 🛠 Roadmap / To-Do
 
 - [ ] **Volumetric Plotting:** Generate `.cube` files for average hole/electron density visualization.
-- [ ] **Conditional Density:** Calculate electron density distribution for a fixed hole position ($\rho_e(\mathbf{r} | \mathbf{r}_h)$).
+- [ ] **Conditional Density:** Calculate electron density distribution for a fixed hole position.
 - [ ] **Molecular Analysis:** Support for finite systems (Molecules) covering LR-TDDFT, BSE, and full-frequency GW analysis.
 
 ## 📦 Requirements
 *   Python 3.x
 *   NumPy
 *   SciPy
-*   Matplotlib
 
 ## ✉️ Contact
 For questions or issues, please contact **Ruiyi Zhou** (ruiyi.zhou@phys.chem.ethz.ch) at ETH Zurich.
