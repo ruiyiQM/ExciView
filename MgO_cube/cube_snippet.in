@@ -1,0 +1,25 @@
+# Cube Snippet | State 1 | Thresh 1.0%
+
+# --- HOLE CUBES ---
+output cube eigenstate_density 10
+   cube kpoint 1
+
+# --- ELECTRON CUBES ---
+output cube eigenstate_density 11
+   cube kpoint 1
+output cube eigenstate_density 11
+   cube kpoint 2
+output cube eigenstate_density 11
+   cube kpoint 8
+output cube eigenstate_density 11
+   cube kpoint 9
+output cube eigenstate_density 11
+   cube kpoint 57
+output cube eigenstate_density 11
+   cube kpoint 65
+output cube eigenstate_density 11
+   cube kpoint 74
+output cube eigenstate_density 11
+   cube kpoint 449
+output cube eigenstate_density 11
+   cube kpoint 512

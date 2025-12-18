@@ -4,6 +4,14 @@ import scipy.sparse as sp
 import sys
 import os
 import re
+import glob
+
+# Try to import ASE (Required for Phase 4)
+try:
+    from ase.io.cube import read_cube, write_cube
+    ASE_AVAILABLE = True
+except ImportError:
+    ASE_AVAILABLE = False
 
 # =============================================================================
 #                                CORE FUNCTIONS
@@ -50,10 +58,7 @@ def read_elsi_state(filename, state_index):
     return sp.csc_matrix((values, row_indices, col_ptr), shape=(n_basis, 1))
 
 def parse_aims_mulliken_file(filename):
-    """
-    Parses a single FHI-aims band_mulliken output file.
-    Returns: data[band][atom] = {'total': val, 'orbitals': np.array([s, p, ...])}
-    """
+    """Parses a single FHI-aims band_mulliken output file."""
     mulliken_data = {} 
     current_band = None
     try:
@@ -62,27 +67,17 @@ def parse_aims_mulliken_file(filename):
         for line in lines:
             parts = line.split()
             if not parts: continue
-            
-            # Header detection
             if parts[0] == "State" and len(parts) == 2 and parts[1].isdigit():
                 current_band = int(parts[1])
                 mulliken_data[current_band] = {}
                 continue
-            
-            # Data Line Parsing
             if current_band is not None and parts[0].isdigit() and int(parts[0]) == current_band:
                 try:
-                    # parts[3] is Atom ID (1-based from file)
                     atom_id = int(parts[3])
                     total_val = float(parts[4])
-                    
-                    # Columns 5 onwards are s, p, d, f...
-                    orbital_vals = np.array([float(x) for x in parts[5:]])
-                    
-                    mulliken_data[current_band][atom_id] = {
-                        'total': total_val,
-                        'orbitals': orbital_vals
-                    }
+                    # Handle variable orbital lengths (s, p, d...)
+                    orb_vals = np.array([float(x) for x in parts[5:]])
+                    mulliken_data[current_band][atom_id] = {'total': total_val, 'orbitals': orb_vals}
                 except (ValueError, IndexError): continue
     except FileNotFoundError: return None
     return mulliken_data
@@ -98,7 +93,7 @@ def get_bse_weights(filename, state_idx, nk, nv, nc):
     return np.abs(coeffs)**2
 
 def parse_snippet_for_mapping(snippet_filename):
-    """Reads mulliken_snippet.in to determine which k-index corresponds to which file."""
+    """Reads mapping from input snippet."""
     k_indices = []
     try:
         with open(snippet_filename, 'r') as f:
@@ -108,246 +103,361 @@ def parse_snippet_for_mapping(snippet_filename):
                     if match:
                         k_indices.append(int(match.group(1)))
     except FileNotFoundError:
-        print(f"[Error] Could not find mapping file: {snippet_filename}")
+        print(f"[Error] Mapping file not found: {snippet_filename}")
         return None
     return k_indices
 
+def parse_control_for_cubes(control_file="cube_snippet.in"):
+    """
+    Parses control.in to find which cubes were actually requested.
+    Returns a SET of tuples: { (k_idx_1based, band_idx_abs), ... }
+    """
+    valid_cubes = set()
+    current_band = None
+    
+    try:
+        with open(control_file, 'r') as f:
+            lines = f.readlines()
+            
+        for line in lines:
+            line = line.strip()
+            # FHI-aims input is case insensitive generally, but let's assume standard output
+            parts = line.split()
+            if not parts: continue
+            
+            # Detect: output cube eigenstate_density <band>
+            if parts[0] == "output" and "cube" in parts and "eigenstate_density" in parts:
+                try:
+                    current_band = int(parts[-1])
+                except ValueError:
+                    current_band = None
+            
+            # Detect: cube kpoint <k>
+            # This line usually follows the output command
+            elif "cube" in parts and "kpoint" in parts:
+                try:
+                    k_idx = int(parts[-1])
+                    if current_band is not None:
+                        valid_cubes.add((k_idx, current_band))
+                        # Note: We don't reset current_band immediately because multiple modifiers might exist,
+                        # but usually only one kpoint per cube command in this workflow.
+                except ValueError:
+                    pass
+                    
+    except FileNotFoundError:
+        print(f"[Error] Could not read {control_file}")
+        return None
+        
+    return valid_cubes
+
 def get_k_coords(k_index, nkx, nky, nkz):
     if nkx * nky * nkz == 0: return (0.0, 0.0, 0.0)
-    iz = k_index % nkz
-    iy = (k_index // nkz) % nky
-    ix = k_index // (nkz * nky)
-    kx_f = ix/nkx if nkx>1 else 0.0
-    ky_f = iy/nky if nky>1 else 0.0
-    kz_f = iz/nkz if nkz>1 else 0.0
-    return (kx_f, ky_f, kz_f)
+    iz = k_index % nkz; iy = (k_index // nkz) % nky; ix = k_index // (nkz * nky)
+    return (ix/nkx if nkx>1 else 0, iy/nky if nky>1 else 0, iz/nkz if nkz>1 else 0)
 
 # =============================================================================
 #                                WORKFLOWS
 # =============================================================================
 
-def workflow_generate_inputs():
-    print("\n--- PHASE 1: Generate Inputs ---")
+def workflow_generate_inputs_mulliken():
+    print("\n--- PHASE 1: Generate Mulliken Inputs ---")
     fname = input("Binary filename: ").strip()
     if not os.path.exists(fname): return print("File not found.")
     
     state_idx = int(input("State Index: "))
-    nv = int(input("Valence Bands (Nv): "))
-    nc = int(input("Conduction Bands (Nc): "))
-    nk = int(input("Total K-points (Nk): "))
-    nkx = int(input("Grid Kx: "))
-    nky = int(input("Grid Ky: "))
-    nkz = int(input("Grid Kz: "))
+    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
+    nkx = int(input("Kx: ")); nky = int(input("Ky: ")); nkz = int(input("Kz: "))
     
-    try:
-        weights_tensor = get_bse_weights(fname, state_idx, nk, nv, nc)
+    try: weights = get_bse_weights(fname, state_idx, nk, nv, nc)
     except Exception as e: return print(f"Error: {e}")
 
-    k_weights = np.sum(weights_tensor, axis=(1, 2))
+    k_weights = np.sum(weights, axis=(1, 2))
     norm = np.sum(k_weights)
     if norm > 0: k_weights /= norm
 
-    thresh_percent = float(input("Enter threshold % (e.g., 5.0): "))
-    thresh_val = thresh_percent / 100.0
-
+    thresh = float(input("Threshold %: ")) / 100.0
     out_file = "mulliken_snippet.in"
     count = 0
     with open(out_file, "w") as f:
-        f.write(f"# Auto-generated for State {state_idx}, Threshold {thresh_percent}%\n")
+        f.write(f"# Mulliken Snippet | State {state_idx} | Thresh {thresh*100}%\n")
         for i, w in enumerate(k_weights):
-            if w >= thresh_val:
+            if w >= thresh:
                 count += 1
                 kx, ky, kz = get_k_coords(i, nkx, nky, nkz)
                 label = f"K_{i}"
                 line = (f"output band_mulliken {kx:.6f} {ky:.6f} {kz:.6f} "
                         f"{kx:.6f} {ky:.6f} {kz:.6f} 2 {label} {label}")
                 f.write(line + "\n")
-                
-    print(f"Success! Wrote {count} lines to '{out_file}'.")
+    print(f"Success! Wrote {count} lines to {out_file}")
 
 def workflow_analyze_spatial():
-    print("\n--- PHASE 2: Spatial & Orbital Analysis ---")
-    
+    print("\n--- PHASE 2: Spatial Analysis (Mulliken) ---")
     fname = input("Binary filename: ").strip()
     if not os.path.exists(fname): return print("File not found.")
-
     state_idx = int(input("State Index: "))
-    nv = int(input("Valence Bands (Nv): "))
-    nc = int(input("Conduction Bands (Nc): "))
-    nk = int(input("Total K-points (Nk): "))
+    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
     
-    print("\n[Mapping]")
-    snippet_file = input("Snippet filename (default: mulliken_snippet.in): ").strip()
+    snippet_file = input("Snippet file (default: mulliken_snippet.in): ").strip()
     if not snippet_file: snippet_file = "mulliken_snippet.in"
-    calculated_k_indices = parse_snippet_for_mapping(snippet_file)
-    if not calculated_k_indices: return
-    
-    print("\n[Band IDs]")
-    v_start = int(input("Absolute ID of First Valence Band: "))
-    c_start = int(input("Absolute ID of First Conduction Band: "))
-    
-    print("\n[Output Files]")
-    pat = input("Pattern (e.g., 'bandmlk{}.out'): ")
-    offset = int(input("Starting index offset (e.g. 1001): "))
+    k_indices = parse_snippet_for_mapping(snippet_file)
+    if not k_indices: return
 
-    print("\nReading Vectors...")
-    try:
-        weights_tensor = get_bse_weights(fname, state_idx, nk, nv, nc)
+    v_start = int(input("First Valence Band ID: "))
+    c_start = int(input("First Conduction Band ID: "))
+    pat = input("File Pattern (e.g. bandmlk{}.out): ")
+    offset = int(input("Start Offset (e.g. 1001): "))
+
+    try: weights = get_bse_weights(fname, state_idx, nk, nv, nc)
     except Exception as e: return print(f"Error: {e}")
 
-    # Storage for Total Populations (per atom)
-    hole_pop = None
-    elec_pop = None
-    atom_ids = []
-    
-    # Storage for Per-Atom Orbital Breakdown
-    # Format: {atom_id: np.array([s, p, d...])}
-    hole_atom_orbs = {}
-    elec_atom_orbs = {}
-    
-    MAX_ORBS = 6 # Support up to h-orbitals safely
-    max_orb_encountered = 0
-    files_processed = 0
+    hole_pop = None; elec_pop = None; atom_ids = []
+    hole_atom_orbs = {}; elec_atom_orbs = {}
+    MAX_ORBS = 6; max_orb = 0; files_proc = 0
 
     print("Processing...")
-    
-    for i, k_actual in enumerate(calculated_k_indices):
-        file_id = offset + i
-        mull_file = pat.format(file_id)
-        
-        m_data = parse_aims_mulliken_file(mull_file)
-        if m_data is None:
-            print(f"  [Warning] Missing file '{mull_file}'")
-            continue
-            
-        files_processed += 1
+    for i, k_idx in enumerate(k_indices):
+        m_file = pat.format(offset + i)
+        m_data = parse_aims_mulliken_file(m_file)
+        if not m_data: continue
+        files_proc += 1
         
         if hole_pop is None:
-            first_band = list(m_data.keys())[0]
-            atom_ids = sorted(list(m_data[first_band].keys()))
-            max_atom = max(atom_ids)
-            hole_pop = np.zeros(max_atom + 1)
-            elec_pop = np.zeros(max_atom + 1)
-
-        # --- Accumulate Hole ---
+            first = list(m_data.keys())[0]
+            atom_ids = sorted(list(m_data[first].keys()))
+            hole_pop = np.zeros(max(atom_ids)+1); elec_pop = np.zeros(max(atom_ids)+1)
+        
         for v in range(nv):
-            band_abs = v_start + v
-            if band_abs in m_data:
-                w = np.sum(weights_tensor[k_actual, v, :]) 
-                
+            if (v_start + v) in m_data:
+                w = np.sum(weights[k_idx, v, :])
                 for atom in atom_ids:
-                    dat = m_data[band_abs][atom]
-                    
-                    # 1. Atomic Population
-                    hole_pop[atom] += w * dat['total']
-                    
-                    # 2. Orbital Population (Per Atom)
-                    orbs = dat['orbitals']
-                    n_o = len(orbs)
-                    if n_o > max_orb_encountered: max_orb_encountered = n_o
-                    
-                    # Initialize array for new atoms
-                    if atom not in hole_atom_orbs:
-                        hole_atom_orbs[atom] = np.zeros(MAX_ORBS)
-                    
-                    if n_o > 0 and n_o <= MAX_ORBS:
-                        hole_atom_orbs[atom][:n_o] += w * orbs
+                    d = m_data[v_start + v][atom]
+                    hole_pop[atom] += w * d['total']
+                    if atom not in hole_atom_orbs: hole_atom_orbs[atom] = np.zeros(MAX_ORBS)
+                    orbs = d['orbitals']; n = len(orbs)
+                    if n > max_orb: max_orb = n
+                    if n <= MAX_ORBS: hole_atom_orbs[atom][:n] += w * orbs
 
-        # --- Accumulate Electron ---
         for c in range(nc):
-            band_abs = c_start + c
-            if band_abs in m_data:
-                w = np.sum(weights_tensor[k_actual, :, c])
-                
+            if (c_start + c) in m_data:
+                w = np.sum(weights[k_idx, :, c])
                 for atom in atom_ids:
-                    dat = m_data[band_abs][atom]
-                    
-                    elec_pop[atom] += w * dat['total']
-                    
-                    orbs = dat['orbitals']
-                    n_o = len(orbs)
-                    if n_o > max_orb_encountered: max_orb_encountered = n_o
+                    d = m_data[c_start + c][atom]
+                    elec_pop[atom] += w * d['total']
+                    if atom not in elec_atom_orbs: elec_atom_orbs[atom] = np.zeros(MAX_ORBS)
+                    orbs = d['orbitals']; n = len(orbs)
+                    if n <= MAX_ORBS: elec_atom_orbs[atom][:n] += w * orbs
 
-                    if atom not in elec_atom_orbs:
-                        elec_atom_orbs[atom] = np.zeros(MAX_ORBS)
-                    
-                    if n_o > 0 and n_o <= MAX_ORBS:
-                        elec_atom_orbs[atom][:n_o] += w * orbs
+    sum_h = np.sum(hole_pop); sum_e = np.sum(elec_pop)
+    if sum_h > 1e-9: 
+        hole_pop /= sum_h
+        for a in hole_atom_orbs: hole_atom_orbs[a] /= sum_h
+    if sum_e > 1e-9: 
+        elec_pop /= sum_e
+        for a in elec_atom_orbs: elec_atom_orbs[a] /= sum_e
 
-    if hole_pop is None: return print("No valid data processed.")
-
-    # --- NORMALIZATION ---
-    sum_h_tot = np.sum(hole_pop)
-    sum_e_tot = np.sum(elec_pop)
-    
-    if sum_h_tot > 1e-9:
-        hole_pop /= sum_h_tot
-        for atom in hole_atom_orbs:
-            hole_atom_orbs[atom] /= sum_h_tot
-            
-    if sum_e_tot > 1e-9:
-        elec_pop /= sum_e_tot
-        for atom in elec_atom_orbs:
-            elec_atom_orbs[atom] /= sum_e_tot
-
-    print(f"\n[Normalization] Data renormalized to sum to 1.0 (Raw captured: {sum_h_tot:.4f})")
-
-    # --- WRITE OUTPUT ---
     out_name = f"exciton_analysis_state_{state_idx}.dat"
     valid_atoms = [idx for idx in range(len(hole_pop)) if idx in atom_ids]
-    
     orb_labels = ['s', 'p', 'd', 'f', 'g', 'h']
     
     with open(out_name, "w") as f:
-        f.write(f"# Exciton Analysis | State {state_idx}\n")
-        f.write(f"# Mapped {files_processed} files using {snippet_file}\n")
-        f.write(f"# Normalization Applied: Yes\n\n")
-
-        # --- SECTION 1: GLOBAL ORBITAL DECOMPOSITION ---
-        # Calculate global sums for summary
-        global_h_orb = np.zeros(MAX_ORBS)
-        global_e_orb = np.zeros(MAX_ORBS)
-        for atom in valid_atoms:
-            if atom in hole_atom_orbs: global_h_orb += hole_atom_orbs[atom]
-            if atom in elec_atom_orbs: global_e_orb += elec_atom_orbs[atom]
-
-        f.write(f"# SECTION 1: ORBITAL ANGULAR MOMENTUM (GLOBAL %)\n")
-        f.write(f"# {'Orbital':<8} {'Hole_Contrib':<15} {'Elec_Contrib':<15}\n")
-        f.write("#" + "-"*40 + "\n")
-        for i in range(max_orb_encountered):
-            lab = orb_labels[i]
-            f.write(f"  {lab:<8} {global_h_orb[i]:<15.6f} {global_e_orb[i]:<15.6f}\n")
-        f.write("\n")
-
-        # --- SECTION 2: ATOMIC POPULATION SUMMARY ---
-        f.write(f"# SECTION 2: ATOMIC POPULATION SUMMARY\n")
-        f.write(f"# {'Atom':<6} {'Hole':<12} {'Electron':<12} {'Diff(E-H)':<12}\n")
-        f.write("#" + "-"*50 + "\n")
-        for atom in valid_atoms:
-            h = hole_pop[atom]; e = elec_pop[atom]
-            f.write(f"  {atom:<6d} {h:<12.6f} {e:<12.6f} {e-h:<12.6f}\n")
-        f.write("\n")
-
-        # --- SECTION 3: DETAILED ATOMIC ORBITAL BREAKDOWN ---
-        f.write(f"# SECTION 3: DETAILED ATOMIC ORBITAL BREAKDOWN\n")
-        f.write(f"# Breakdown of l-channels (s, p, d...) per atom\n")
+        f.write(f"# Exciton Analysis State {state_idx}\n# Files: {files_proc}\n\n")
+        f.write("# SECTION 1: DETAILED ATOMIC ORBITAL BREAKDOWN\n")
         f.write("#" + "-"*60 + "\n")
-        
         for atom in valid_atoms:
-            h_tot = hole_pop[atom]
-            e_tot = elec_pop[atom]
-            f.write(f"Atom: {atom:<4d} | Hole Pop: {h_tot:.6f} | Elec Pop: {e_tot:.6f}\n")
-            
-            # Retrieve orbital arrays (handle if missing for some reason)
+            f.write(f"Atom: {atom:<4d} | Hole Pop: {hole_pop[atom]:.6f} | Elec Pop: {elec_pop[atom]:.6f}\n")
             h_orbs = hole_atom_orbs.get(atom, np.zeros(MAX_ORBS))
             e_orbs = elec_atom_orbs.get(atom, np.zeros(MAX_ORBS))
-            
-            for i in range(max_orb_encountered):
+            for i in range(max_orb):
                 lab = f"l={i} ({orb_labels[i]})"
                 f.write(f"    {lab:<10} H: {h_orbs[i]:.6f}   E: {e_orbs[i]:.6f}\n")
             f.write("\n")
+    print(f"Done! Saved to {out_name}")
+
+def workflow_generate_cube_inputs():
+    print("\n--- PHASE 3: Generate Cube Inputs ---")
+    fname = input("Binary filename: ").strip()
+    if not os.path.exists(fname): return print("File not found.")
+    
+    state_idx = int(input("State Index: "))
+    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
+    v_start = int(input("Absolute ID First Valence Band: "))
+    c_start = int(input("Absolute ID First Conduction Band: "))
+
+    try: weights = get_bse_weights(fname, state_idx, nk, nv, nc)
+    except Exception as e: return print(f"Error: {e}")
+
+    w_hole = np.sum(weights, axis=2) # Shape (Nk, Nv)
+    w_elec = np.sum(weights, axis=1) # Shape (Nk, Nc)
+
+    thresh = float(input("Threshold % (e.g. 1.0): ")) / 100.0
+    
+    out_file = "cube_snippet.in"
+    count = 0
+    
+    with open(out_file, "w") as f:
+        f.write(f"# Cube Snippet | State {state_idx} | Thresh {thresh*100}%\n")
+        
+        # 1. Hole Requests
+        f.write("\n# --- HOLE CUBES ---\n")
+        for k in range(nk):
+            for v in range(nv):
+                if w_hole[k, v] >= thresh:
+                    count += 1
+                    band_abs = v_start + v
+                    f.write(f"output cube eigenstate_density {band_abs}\n")
+                    f.write(f"   cube kpoint {k+1}\n")
+
+        # 2. Electron Requests
+        f.write("\n# --- ELECTRON CUBES ---\n")
+        for k in range(nk):
+            for c in range(nc):
+                if w_elec[k, c] >= thresh:
+                    count += 1
+                    band_abs = c_start + c
+                    f.write(f"output cube eigenstate_density {band_abs}\n")
+                    f.write(f"   cube kpoint {k+1}\n")
+                    
+    print(f"Success! Generated {count} cube requests in {out_file}")
+    print("Copy this to control.in and run FHI-aims.")
+
+def workflow_analyze_cubes():
+    print("\n--- PHASE 4: Average Density (Cube Summation) ---")
+    if not ASE_AVAILABLE:
+        print("[Error] ASE library not installed. Please run: pip install ase")
+        return
+
+    fname = input("Binary filename: ").strip()
+    if not os.path.exists(fname): return print("File not found.")
+    
+    state_idx = int(input("State Index: "))
+    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
+    v_start = int(input("Absolute ID First Valence Band: "))
+    c_start = int(input("Absolute ID First Conduction Band: "))
+    
+    # 1. Parse Control.in for validation
+    print("\n[Validation]")
+    ctrl_file = input("Control file (default: cube_snippet.in): ").strip()
+    if not ctrl_file: ctrl_file = "cube_snippet.in"
+    
+    active_cubes = parse_control_for_cubes(ctrl_file)
+    if not active_cubes:
+        print("  -> Could not find any valid cube requests in control file.")
+        print("  -> Proceeding without validation? (Risk of missing files)")
+        if input("  -> Continue? (y/n): ").lower() != 'y': return
+        use_validation = False
+    else:
+        print(f"  -> Found {len(active_cubes)} active cube targets in control.in")
+        use_validation = True
+
+    print("\n[Filename Pattern]")
+    print("Example: cube_001_eigenstate_density_{:05d}_spin_1_k_point_{:04d}.cube")
+    default_pat = "cube_*_eigenstate_density_{:05d}_spin_1_k_point_{:04d}.cube"
+    pat = input(f"Pattern (default: {default_pat}): ").strip()
+    if not pat: pat = default_pat
+
+    print("\nReading Vectors...")
+    try: weights = get_bse_weights(fname, state_idx, nk, nv, nc)
+    except Exception as e: return print(f"Error: {e}")
+
+    w_hole = np.sum(weights, axis=2) # (Nk, Nv)
+    w_elec = np.sum(weights, axis=1) # (Nk, Nc)
+
+    # Note: We sum up weights only for the ones we actually process
+    processed_hole_weight = 0.0
+    processed_elec_weight = 0.0
+
+    print("Summing Hole Density...")
+    avg_hole_data = None
+    ref_atoms = None
+    count_h = 0
+    
+    # --- HOLE SUMMATION ---
+    for k in range(nk):
+        for v in range(nv):
+            band_abs = v_start + v
+            # Check if this cube exists in control.in
+            if use_validation and (k+1, band_abs) not in active_cubes:
+                continue
+                
+            w = w_hole[k, v]
+            search_pat = pat.format(band_abs, k+1)
+            files = glob.glob(search_pat)
             
-    print(f"\nDone! Results written to {out_name}")
+            if not files:
+                # If validation passed but file missing, warn user
+                if use_validation: print(f"  [Warning] Missing cube: {search_pat}")
+                continue
+            
+            f_path = files[0]
+            with open(f_path, 'r') as f:
+                content = read_cube(f, read_data=True)
+            
+            if isinstance(content, dict):
+                data = content['data']
+                atoms = content['atoms']
+            else:
+                data, atoms = content
+            
+            if avg_hole_data is None:
+                avg_hole_data = np.zeros_like(data)
+                ref_atoms = atoms
+            
+            avg_hole_data += w * data
+            processed_hole_weight += w
+            count_h += 1
+
+    if avg_hole_data is not None and processed_hole_weight > 0:
+        avg_hole_data /= processed_hole_weight
+        out_h = f"avg_hole_state_{state_idx}.cube"
+        with open(out_h, 'w') as f:
+            write_cube(f, ref_atoms, data=avg_hole_data)
+        print(f"  -> Wrote {out_h} (Summed {count_h} files)")
+
+    print("Summing Electron Density...")
+    avg_elec_data = None
+    count_e = 0
+    
+    # --- ELECTRON SUMMATION ---
+    for k in range(nk):
+        for c in range(nc):
+            band_abs = c_start + c
+            if use_validation and (k+1, band_abs) not in active_cubes:
+                continue
+                
+            w = w_elec[k, c]
+            search_pat = pat.format(band_abs, k+1)
+            files = glob.glob(search_pat)
+            
+            if not files:
+                if use_validation: print(f"  [Warning] Missing cube: {search_pat}")
+                continue
+            
+            f_path = files[0]
+            with open(f_path, 'r') as f:
+                content = read_cube(f, read_data=True)
+            
+            if isinstance(content, dict):
+                data = content['data']
+                atoms = content['atoms']
+            else:
+                data, atoms = content
+            
+            if avg_elec_data is None:
+                avg_elec_data = np.zeros_like(data)
+                if ref_atoms is None: ref_atoms = atoms
+            
+            avg_elec_data += w * data
+            processed_elec_weight += w
+            count_e += 1
+
+    if avg_elec_data is not None and processed_elec_weight > 0:
+        avg_elec_data /= processed_elec_weight
+        out_e = f"avg_elec_state_{state_idx}.cube"
+        with open(out_e, 'w') as f:
+            write_cube(f, ref_atoms, data=avg_elec_data)
+        print(f"  -> Wrote {out_e} (Summed {count_e} files)")
+
+    print("\nDone!")
 
 # =============================================================================
 #                                MAIN MENU
@@ -355,16 +465,20 @@ def workflow_analyze_spatial():
 
 def main():
     print("==================================================")
-    print("          BSE & MULLIKEN ANALYSIS TOOL            ")
+    print("          BSE ANALYSIS TOOLKIT (ExciView)         ")
     print("==================================================")
-    print("1. Phase 1: Generate Input Files (with threshold)")
-    print("2. Phase 2: Analyze Output (Spatial + Orbitals)")
+    print("1. Phase 1: Generate Mulliken Inputs")
+    print("2. Phase 2: Analyze Mulliken Output")
+    print("3. Phase 3: Generate Cube Inputs")
+    print("4. Phase 4: Analyze Cube Files (Average Density)")
     print("0. Exit")
     
     choice = input("\nSelect Option: ").strip()
     
-    if choice == "1": workflow_generate_inputs()
+    if choice == "1": workflow_generate_inputs_mulliken()
     elif choice == "2": workflow_analyze_spatial()
+    elif choice == "3": workflow_generate_cube_inputs()
+    elif choice == "4": workflow_analyze_cubes()
     elif choice == "0": sys.exit(0)
     else: print("Invalid option.")
 
