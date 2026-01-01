@@ -37,7 +37,7 @@ The tool operates via an interactive menu with four main analysis pipelines:
 ## 🛠 Roadmap / To-Do
 
 - [x] **Volumetric Plotting:** Generate `.cube` files for average hole/electron density visualization.
-- [] **Conditional Density:** Calculate electron density distribution for a fixed hole position.
+- [ ] **Conditional Density:** Calculate electron density distribution for a fixed hole position.
 - [ ] **Molecular Analysis:** Support for finite systems (Molecules) covering LR-TDDFT, BSE, and full-frequency GW analysis.
 
 ## 📦 Requirements
