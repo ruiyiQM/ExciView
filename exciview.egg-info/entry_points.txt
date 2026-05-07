@@ -1,0 +1,2 @@
+[console_scripts]
+exciview = exciview.main:main

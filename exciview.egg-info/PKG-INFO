@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: exciview
+Version: 0.1.0
+Summary: BSE Wavefunction Analysis Tools for FHI-aims
+Author-email: Ruiyi Zhou <ruiyi.zhou@phys.chem.ethz.ch>
+Requires-Dist: numpy
+Requires-Dist: scipy
+Requires-Dist: ase
