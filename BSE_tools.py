@@ -154,12 +154,17 @@ def get_grid_val_at_coord(data, atoms, coord):
 
 def workflow_generate_inputs_mulliken():
     print("\n--- PHASE 1: Generate Mulliken Inputs ---")
-    fname = input("Binary filename: ").strip()
+    print("Provide the BSE setup used to build the ELSI transition vector.")
+    fname = input("Binary filename (ELSI file, e.g. BSE_vecs): ").strip()
     if not os.path.exists(fname): return print("File not found.")
     
-    state_idx = int(input("State Index: "))
-    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
-    nkx = int(input("Kx: ")); nky = int(input("Ky: ")); nkz = int(input("Kz: "))
+    state_idx = int(input("State index (0-based, e.g. 0 for first exciton): "))
+    nv = int(input("Nv (number of valence bands in BSE space): "))
+    nc = int(input("Nc (number of conduction bands in BSE space): "))
+    nk = int(input("Nk (total number of k-points): "))
+    nkx = int(input("Kx (k-grid size in x): "))
+    nky = int(input("Ky (k-grid size in y): "))
+    nkz = int(input("Kz (k-grid size in z): "))
     
     try: weights = get_bse_weights(fname, state_idx, nk, nv, nc)
     except Exception as e: return print(f"Error: {e}")
@@ -168,7 +173,7 @@ def workflow_generate_inputs_mulliken():
     norm = np.sum(k_weights)
     if norm > 0: k_weights /= norm
 
-    thresh = float(input("Threshold %: ")) / 100.0
+    thresh = float(input("Threshold % (keep k-points with weight >= this %, e.g. 1.0): ")) / 100.0
     out_file = "mulliken_snippet.in"
     count = 0
     with open(out_file, "w") as f:
@@ -185,20 +190,23 @@ def workflow_generate_inputs_mulliken():
 
 def workflow_analyze_spatial():
     print("\n--- PHASE 2: Spatial Analysis (Mulliken) ---")
-    fname = input("Binary filename: ").strip()
+    print("Use the same BSE settings as Phase 1 and the generated Mulliken files.")
+    fname = input("Binary filename (ELSI file, e.g. BSE_vecs): ").strip()
     if not os.path.exists(fname): return print("File not found.")
-    state_idx = int(input("State Index: "))
-    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
+    state_idx = int(input("State index (0-based): "))
+    nv = int(input("Nv (number of valence bands): "))
+    nc = int(input("Nc (number of conduction bands): "))
+    nk = int(input("Nk (total number of k-points): "))
     
-    snippet_file = input("Snippet file (default: mulliken_snippet.in): ").strip()
+    snippet_file = input("Snippet file with K mapping (default: mulliken_snippet.in): ").strip()
     if not snippet_file: snippet_file = "mulliken_snippet.in"
     k_indices = parse_snippet_for_mapping(snippet_file)
     if not k_indices: return
 
-    v_start = int(input("First Valence Band ID: "))
-    c_start = int(input("First Conduction Band ID: "))
-    pat = input("File Pattern (e.g. bandmlk{}.out): ")
-    offset = int(input("Start Offset (e.g. 1001): "))
+    v_start = int(input("First valence band absolute ID in Mulliken files: "))
+    c_start = int(input("First conduction band absolute ID in Mulliken files: "))
+    pat = input("Mulliken file pattern (use {} for running index, e.g. bandmlk{}.out): ")
+    offset = int(input("Start index for file numbering (e.g. 1001): "))
 
     try: weights = get_bse_weights(fname, state_idx, nk, nv, nc)
     except Exception as e: return print(f"Error: {e}")
@@ -268,13 +276,16 @@ def workflow_analyze_spatial():
 
 def workflow_generate_cube_inputs():
     print("\n--- PHASE 3: Generate Cube Inputs ---")
-    fname = input("Binary filename: ").strip()
+    print("This phase generates cube requests for dominant hole/electron components.")
+    fname = input("Binary filename (ELSI file, e.g. BSE_vecs): ").strip()
     if not os.path.exists(fname): return print("File not found.")
     
-    state_idx = int(input("State Index: "))
-    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
-    v_start = int(input("Absolute ID First Valence Band: "))
-    c_start = int(input("Absolute ID First Conduction Band: "))
+    state_idx = int(input("State index (0-based): "))
+    nv = int(input("Nv (number of valence bands): "))
+    nc = int(input("Nc (number of conduction bands): "))
+    nk = int(input("Nk (total number of k-points): "))
+    v_start = int(input("Absolute ID of first valence band (for output cube): "))
+    c_start = int(input("Absolute ID of first conduction band (for output cube): "))
 
     try: weights = get_bse_weights(fname, state_idx, nk, nv, nc)
     except Exception as e: return print(f"Error: {e}")
@@ -282,7 +293,7 @@ def workflow_generate_cube_inputs():
     w_hole = np.sum(weights, axis=2) 
     w_elec = np.sum(weights, axis=1) 
 
-    thresh = float(input("Threshold % (e.g. 1.0): ")) / 100.0
+    thresh = float(input("Threshold % (keep transitions with weight >= this %, e.g. 1.0): ")) / 100.0
     
     out_file = "cube_snippet.in"
     count = 0
@@ -313,16 +324,19 @@ def workflow_analyze_cubes():
     print("\n--- PHASE 4: Average Density (Cube Summation) ---")
     if not ASE_AVAILABLE: return print("[Error] ASE not installed.")
 
-    fname = input("Binary filename: ").strip()
+    print("Provide the same BSE dimensions used for generating cube requests.")
+    fname = input("Binary filename (ELSI file, e.g. BSE_vecs): ").strip()
     if not os.path.exists(fname): return print("File not found.")
     
-    state_idx = int(input("State Index: "))
-    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
-    v_start = int(input("Absolute ID First Valence Band: "))
-    c_start = int(input("Absolute ID First Conduction Band: "))
+    state_idx = int(input("State index (0-based): "))
+    nv = int(input("Nv (number of valence bands): "))
+    nc = int(input("Nc (number of conduction bands): "))
+    nk = int(input("Nk (total number of k-points): "))
+    v_start = int(input("Absolute ID of first valence band: "))
+    c_start = int(input("Absolute ID of first conduction band: "))
     
     print("\n[Validation]")
-    ctrl_file = input("Control file (default: cube_snippet.in): ").strip()
+    ctrl_file = input("Control/snippet file to validate requests (default: cube_snippet.in): ").strip()
     if not ctrl_file: ctrl_file = "cube_snippet.in"
     active_cubes = parse_control_for_cubes(ctrl_file)
     if not active_cubes:
@@ -334,7 +348,7 @@ def workflow_analyze_cubes():
 
     print("\n[Filename Pattern]")
     default_pat = "cube_*_eigenstate_density_{:05d}_spin_1_k_point_{:04d}.cube"
-    pat = input(f"Pattern (default: {default_pat}): ").strip()
+    pat = input(f"Cube filename pattern (default: {default_pat}): ").strip()
     if not pat: pat = default_pat
 
     print("\nReading Vectors...")
@@ -400,12 +414,17 @@ def workflow_analyze_cubes():
 
 def workflow_analyze_bz():
     print("\n--- PHASE 5: BZ & Band Analysis (Text Only) ---")
-    fname = input("Binary filename: ").strip()
+    print("This phase reports dominant k-points and band transitions for one exciton state.")
+    fname = input("Binary filename (ELSI file, e.g. BSE_vecs): ").strip()
     if not os.path.exists(fname): return print("File not found.")
     
-    state_idx = int(input("State Index: "))
-    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
-    nkx = int(input("Kx: ")); nky = int(input("Ky: ")); nkz = int(input("Kz: "))
+    state_idx = int(input("State index (0-based): "))
+    nv = int(input("Nv (number of valence bands): "))
+    nc = int(input("Nc (number of conduction bands): "))
+    nk = int(input("Nk (total number of k-points): "))
+    nkx = int(input("Kx (k-grid size in x): "))
+    nky = int(input("Ky (k-grid size in y): "))
+    nkz = int(input("Kz (k-grid size in z): "))
     
     try: weights = get_bse_weights(fname, state_idx, nk, nv, nc)
     except Exception as e: return print(f"Error: {e}")
@@ -469,21 +488,23 @@ def workflow_analyze_bz():
         print(f"{h_label} -> {e_label:<12} {val:.2%}")
 
 def workflow_generate_cond_inputs():
-    print("\n--- PHASE 5: Generate Conditional Wavefunction Inputs ---")
-    fname = input("Binary filename: ").strip()
+    print("\n--- PHASE 6: Generate Conditional Wavefunction Inputs ---")
+    fname = input("Binary filename (ELSI file, e.g. BSE_vecs): ").strip()
     if not os.path.exists(fname): return print("File not found.")
     
-    state_idx = int(input("State Index: "))
-    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
-    v_start = int(input("Absolute ID First Valence Band: "))
-    c_start = int(input("Absolute ID First Conduction Band: "))
+    state_idx = int(input("State index (0-based): "))
+    nv = int(input("Nv (number of valence bands): "))
+    nc = int(input("Nc (number of conduction bands): "))
+    nk = int(input("Nk (total number of k-points): "))
+    v_start = int(input("Absolute ID of first valence band: "))
+    c_start = int(input("Absolute ID of first conduction band: "))
 
     try: weights = get_bse_weights(fname, state_idx, nk, nv, nc)
     except Exception as e: return print(f"Error: {e}")
 
     w_hole = np.sum(weights, axis=2) 
     w_elec = np.sum(weights, axis=1)
-    thresh = float(input("Threshold % (e.g. 1.0): ")) / 100.0
+    thresh = float(input("Threshold % (keep components with weight >= this %, e.g. 1.0): ")) / 100.0
     
     out_file = "cube_cond_snippet.in"
     count = 0
@@ -508,30 +529,32 @@ def workflow_generate_cond_inputs():
     print(f"Success! Generated {count} wavefunction requests in {out_file}")
 
 def workflow_analyze_cond():
-    print("\n--- PHASE 6: Conditional Density Analysis ---")
+    print("\n--- PHASE 7: Conditional Density Analysis ---")
     if not ASE_AVAILABLE: return print("[Error] ASE not installed.")
-    fname = input("Binary filename: ").strip()
+    fname = input("Binary filename (ELSI file, e.g. BSE_vecs): ").strip()
     if not os.path.exists(fname): return print("File not found.")
     
-    state_idx = int(input("State Index: "))
-    nv = int(input("Nv: ")); nc = int(input("Nc: ")); nk = int(input("Nk: "))
-    v_start = int(input("Abs Valence ID: "))
-    c_start = int(input("Abs Conduction ID: "))
+    state_idx = int(input("State index (0-based): "))
+    nv = int(input("Nv (number of valence bands): "))
+    nc = int(input("Nc (number of conduction bands): "))
+    nk = int(input("Nk (total number of k-points): "))
+    v_start = int(input("Absolute first valence band ID: "))
+    c_start = int(input("Absolute first conduction band ID: "))
 
     print("\n[Fixed Hole Position]")
-    hx = float(input("  x (Ang): ")); hy = float(input("  y (Ang): ")); hz = float(input("  z (Ang): "))
+    hx = float(input("  x (Ang, Cartesian): ")); hy = float(input("  y (Ang, Cartesian): ")); hz = float(input("  z (Ang, Cartesian): "))
     r_fix = np.array([hx, hy, hz])
 
     print("\n[Pattern]")
     default_pat = "cube_*_eigenstate_{:05d}_spin_1_k_point_{:04d}.cube"
-    pat = input(f"Pattern (default: {default_pat}): ").strip() or default_pat
+    pat = input(f"Wavefunction cube filename pattern (default: {default_pat}): ").strip() or default_pat
 
     print("\nReading Wavefunction Coefficients...")
     sparse_vec = read_elsi_state(fname, state_idx)
     dense_vec = sparse_vec.toarray().flatten()
     coeffs = dense_vec.reshape((nk, nv, nc)) 
 
-    thresh = float(input("Threshold % used in Phase 5: ")) / 100.0
+    thresh = float(input("Threshold % used in conditional input generation (Phase 6): ")) / 100.0
     w_check = np.sum(np.abs(coeffs)**2, axis=2)
 
     print("Step A: Extracting hole values...")
@@ -603,7 +626,7 @@ def main():
     print("7. Phase 7: Analyze Conditional Density")
     print("0. Exit")
     
-    choice = input("\nSelect Option: ").strip()
+    choice = input("\nSelect option (0-7): ").strip()
     
     if choice == "1": workflow_generate_inputs_mulliken()
     elif choice == "2": workflow_analyze_spatial()
