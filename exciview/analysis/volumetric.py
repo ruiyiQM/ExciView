@@ -1,10 +1,12 @@
+"""Generate cube requests and form weighted average electron/hole densities."""
+
 import numpy as np
 import glob
 from exciview.io.cube_tools import safe_read_cube, write_cube, ASE_AVAILABLE
 from exciview.io.aims_parser import parse_control_for_cubes
 
 def generate_cube_inputs(exciton, threshold=0.01, filename="cube_snippet.in"):
-    """Phase 3: Generate cube requests."""
+    """Generate eigenstate-density requests for significant hole/electron bands."""
     w_h = exciton.get_hole_weights()
     w_e = exciton.get_electron_weights()
     
@@ -26,7 +28,7 @@ def generate_cube_inputs(exciton, threshold=0.01, filename="cube_snippet.in"):
     print(f"Requests written to {filename}")
 
 def sum_average_density(exciton, pattern, control_file="cube_snippet.in"):
-    """Phase 4: Sum cubes."""
+    """Read requested cube files and write normalized incoherent average densities."""
     if not ASE_AVAILABLE: return print("ASE required.")
     
     valid_set = parse_control_for_cubes(control_file)
@@ -40,7 +42,7 @@ def sum_average_density(exciton, pattern, control_file="cube_snippet.in"):
                 b_abs = start_band + b
                 if valid_set and (k+1, b_abs) not in valid_set: continue
                 
-                # File search
+                # Search using the caller's band/k-point naming pattern.
                 pat = pattern.format(b_abs, k+1)
                 files = glob.glob(pat)
                 if not files: continue

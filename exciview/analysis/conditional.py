@@ -1,23 +1,24 @@
+"""Conditional electron-density analysis for a fixed hole position."""
+
 import numpy as np
 import glob
 from exciview.io.cube_tools import read_complex_pair, get_grid_val, write_cube, ASE_AVAILABLE
 
 def generate_cond_inputs(exciton, threshold=0.01, filename="cube_cond_snippet.in"):
-    """Phase 6: Generate Real+Imag cube requests."""
+    """Generate requests for real and imaginary wavefunction cube files."""
     w_h = exciton.get_hole_weights()
     w_e = exciton.get_electron_weights()
     
     with open(filename, "w") as f:
         f.write(f"# Conditional Snippet\n")
-        # Logic same as volumetric, but output 'eigenstate' AND 'eigenstate_imag'
-        # ... (Abbreviated for length, logic matches previous script) ...
+        # The complete request-generation logic is still a placeholder in this release.
     print(f"Written to {filename}")
 
 def analyze_conditional(exciton, r_fix, pat_real, pat_imag, thresh=0.01):
-    """Phase 7: Coherent Summation."""
+    """Build a conditional electron density by coherently summing wavefunctions."""
     if not ASE_AVAILABLE: return
     
-    # 1. Get Hole Values (Complex)
+    # 1. Sample each relevant hole wavefunction at the fixed hole coordinate.
     print("Extracting hole amplitudes...")
     hole_vals = {}
     w_h = exciton.get_hole_weights()
@@ -30,18 +31,18 @@ def analyze_conditional(exciton, r_fix, pat_real, pat_imag, thresh=0.01):
                 if data is not None:
                     hole_vals[(k, v)] = get_grid_val(data, atoms, r_fix)
 
-    # 2. Sum Electron Wavefunctions
+    # 2. Use the sampled hole amplitudes to construct the electron wavefunction.
     print("Constructing electron wavefunction...")
     total_psi = None; ref_atoms = None
     w_e = exciton.get_electron_weights()
     
     for k in range(exciton.nk):
         for c in range(exciton.nc):
-            # Calculate Mixing Coeff C_ck
+            # Calculate the hole-conditioned mixing coefficient for this conduction band.
             coeff = 0j
             for v in range(exciton.nv):
                 if (k, v) in hole_vals:
-                    # A_vc * Psi_h*
+                    # The BSE amplitude is multiplied by the complex-conjugate hole value.
                     val = exciton.coefficients[k, v, c] * np.conjugate(hole_vals[(k, v)])
                     coeff += val
             
@@ -55,7 +56,7 @@ def analyze_conditional(exciton, r_fix, pat_real, pat_imag, thresh=0.01):
                 if total_psi is None: total_psi = np.zeros_like(data); ref_atoms = atoms
                 total_psi += coeff * data
 
-    # 3. Square and Write
+    # 3. Convert the coherent wavefunction into a density and write a cube file.
     if total_psi is not None:
         rho = np.abs(total_psi)**2
         out = f"cond_density_{exciton.id}.cube"

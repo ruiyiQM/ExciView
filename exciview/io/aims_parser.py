@@ -1,13 +1,16 @@
+"""Parsers for FHI-aims Mulliken output and generated input snippets."""
+
 import numpy as np
 import re
 
 def parse_mulliken_file(filename):
-    """Parses band_mulliken output. Returns dict[band][atom] = {total, orbitals}"""
+    """Parse band_mulliken output into ``band -> atom -> values`` mappings."""
     mulliken_data = {} 
     current_band = None
     try:
         with open(filename, 'r') as f:
             lines = f.readlines()
+        # The output is line-oriented, so identify state headers before atom rows.
         for line in lines:
             parts = line.split()
             if not parts: continue
@@ -26,7 +29,7 @@ def parse_mulliken_file(filename):
     return mulliken_data
 
 def parse_control_for_cubes(control_file="cube_snippet.in"):
-    """Returns set of (k_idx, band_idx) found in control file."""
+    """Return the (k-point, band) cube requests found in an input snippet."""
     valid_cubes = set()
     current_band = None
     try:
@@ -34,11 +37,11 @@ def parse_control_for_cubes(control_file="cube_snippet.in"):
             for line in f:
                 parts = line.strip().split()
                 if not parts: continue
-                # Detect output cube
+                # Remember the band associated with the next k-point modifier.
                 if parts[0] == "output" and "cube" in parts:
                     try: current_band = int(parts[-1])
                     except: current_band = None
-                # Detect kpoint modifier
+                # Pair the remembered band with the requested k-point index.
                 elif "cube" in parts and "kpoint" in parts:
                     try:
                         k_idx = int(parts[-1])
@@ -48,7 +51,7 @@ def parse_control_for_cubes(control_file="cube_snippet.in"):
     return valid_cubes
 
 def parse_snippet_for_mapping(filename):
-    """Extracts K-indices from generated mulliken_snippet.in"""
+    """Extract k-point labels from the generated Mulliken snippet."""
     k_indices = []
     try:
         with open(filename, 'r') as f:

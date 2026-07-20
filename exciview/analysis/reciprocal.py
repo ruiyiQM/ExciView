@@ -1,10 +1,12 @@
+"""Reciprocal-space k-point and band-transition statistics."""
+
 import numpy as np
 
 def analyze_bz_and_bands(exciton):
-    """Analyzes Reciprocal Space and Band contributions."""
+    """Print dominant k-point, hole-band, and electron-band contributions."""
     print("\n" + "="*40 + "\n       RECIPROCAL & BAND ANALYSIS\n" + "="*40)
     
-    # 1. K-Points
+    # First normalize the total contribution at each k-point.
     k_weights = np.sum(exciton.weights, axis=(1, 2))
     norm = np.sum(k_weights)
     if norm > 0: k_weights /= norm
@@ -15,7 +17,7 @@ def analyze_bz_and_bands(exciton):
     print(f"Total Norm: {norm:.6f}")
     print(f"Dominant K: Index {dom_k} ({k_weights[dom_k]:.2%}) -> ({kx:.3f}, {ky:.3f}, {kz:.3f})")
     
-    # 2. Bands
+    # Sum over k-points to obtain a valence-to-conduction transition matrix.
     weights_norm = exciton.weights / norm if norm > 0 else exciton.weights
     trans_matrix = np.sum(weights_norm, axis=0) # Sum over K
     

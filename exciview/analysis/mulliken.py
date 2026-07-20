@@ -1,8 +1,11 @@
+"""Generate FHI-aims Mulliken requests and aggregate atomic populations."""
+
 import numpy as np
 from exciview.io.aims_parser import parse_mulliken_file, parse_snippet_for_mapping
 
 def generate_mulliken_inputs(exciton, threshold=0.01, filename="mulliken_snippet.in"):
-    """Phase 1: Generate FHI-aims input."""
+    """Generate Mulliken requests for k-points whose normalized weight is significant."""
+    # Collapse valence and conduction dimensions to obtain one weight per k-point.
     k_weights = np.sum(exciton.weights, axis=(1, 2))
     norm = np.sum(k_weights)
     if norm > 0: k_weights /= norm
@@ -20,7 +23,7 @@ def generate_mulliken_inputs(exciton, threshold=0.01, filename="mulliken_snippet
     print(f"Generated {count} requests in {filename}")
 
 def analyze_mulliken_output(exciton, pattern, offset, snippet_file, v_start, c_start):
-    """Phase 2: Parse outputs and compute populations."""
+    """Parse FHI-aims outputs and compute normalized hole/electron populations."""
     k_indices = parse_snippet_for_mapping(snippet_file)
     if not k_indices: return
     
@@ -37,7 +40,7 @@ def analyze_mulliken_output(exciton, pattern, offset, snippet_file, v_start, c_s
             atoms = sorted(list(m_data[list(m_data.keys())[0]].keys()))
             hole_pop = np.zeros(max(atoms)+1); elec_pop = np.zeros(max(atoms)+1)
 
-        # Helper to accumulate
+        # Accumulate total and angular-momentum-resolved contributions for one band.
         def acc(pop, orbs_dict, band_idx, weight):
             nonlocal max_orb
             if band_idx in m_data:
@@ -49,17 +52,17 @@ def analyze_mulliken_output(exciton, pattern, offset, snippet_file, v_start, c_s
                     if n > max_orb: max_orb = n
                     orbs_dict[atom][:n] += weight * d['orbitals']
 
-        # Hole Loop
+        # Hole weights sum over all conduction partners for each valence band.
         for v in range(exciton.nv):
             w = np.sum(exciton.weights[k_idx, v, :])
             acc(hole_pop, hole_orbs, v_start + v, w)
             
-        # Elec Loop
+        # Electron weights sum over all valence partners for each conduction band.
         for c in range(exciton.nc):
             w = np.sum(exciton.weights[k_idx, :, c])
             acc(elec_pop, elec_orbs, c_start + c, w)
 
-    # Normalize
+    # Normalize hole and electron populations independently to unit total weight.
     h_sum = np.sum(hole_pop); e_sum = np.sum(elec_pop)
     if h_sum > 0: 
         hole_pop /= h_sum
@@ -68,7 +71,7 @@ def analyze_mulliken_output(exciton, pattern, offset, snippet_file, v_start, c_s
         elec_pop /= e_sum
         for a in elec_orbs: elec_orbs[a] /= e_sum
         
-    # Write output
+    # Write a compact atom-by-orbital report for downstream inspection or plotting.
     out_name = f"exciton_analysis_state_{exciton.id}.dat"
     with open(out_name, 'w') as f:
         f.write("# ExciView Analysis\n# SECTION 1: ATOMIC BREAKDOWN\n")

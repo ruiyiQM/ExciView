@@ -1,3 +1,5 @@
+"""Memory-efficient reader for sparse ELSI binary eigenvector files."""
+
 import struct
 import numpy as np
 import scipy.sparse as sp
@@ -7,6 +9,7 @@ def read_elsi_state(filename, state_index):
     Reads a specific column (state) from an ELSI binary format file.
     Uses file seeking for memory efficiency.
     """
+    # ELSI stores 64-bit pointers, 32-bit row indices, and double values.
     fmt_i8 = "l"; fmt_i4 = "i"; fmt_d  = "d"
     size_i8 = 8; size_i4 = 4; size_d  = 8
     
@@ -16,7 +19,7 @@ def read_elsi_state(filename, state_index):
         n_basis = header[3]
         nnz_total = header[5]
         
-        # Validation
+        # Validate the requested column before calculating file offsets.
         if state_index < 0 or state_index >= n_basis:
             raise ValueError(f"State index {state_index} out of bounds.")
 
@@ -24,7 +27,7 @@ def read_elsi_state(filename, state_index):
         offset_row_idx = offset_col_ptr + (n_basis * size_i8)
         offset_values  = offset_row_idx + (nnz_total * size_i4)
         
-        # Get Pointers
+        # Read the compressed-column pointers for the requested state.
         f.seek(offset_col_ptr + (state_index * size_i8))
         ptr_start = struct.unpack(fmt_i8, f.read(size_i8))[0]
         
@@ -39,11 +42,11 @@ def read_elsi_state(filename, state_index):
 
         data_offset = ptr_start - 1
         
-        # Read Rows
+        # Read sparse row indices and convert ELSI's one-based indices to Python's zero-based form.
         f.seek(offset_row_idx + (data_offset * size_i4))
         row_indices = np.array(struct.unpack(fmt_i4 * n_elements, f.read(n_elements * size_i4))) - 1
         
-        # Read Values
+        # Read real values or interleaved real/imaginary pairs.
         val_offset_bytes = data_offset * (16 if is_complex else 8)
         f.seek(offset_values + val_offset_bytes)
         
